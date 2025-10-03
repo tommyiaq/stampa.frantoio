@@ -28,6 +28,7 @@ class BluetoothPrinterApp extends StatefulWidget {
 }
 
 class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
+  final TextEditingController _textController = TextEditingController();
   BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
   List<BluetoothDevice> _devicesList = [];
   BluetoothDevice? _selectedDevice;
@@ -199,12 +200,19 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
       );
       return;
     }
+    String text = _textController.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter text to print.')),
+      );
+      return;
+    }
     try {
       await bluetooth.printNewLine();
-      await bluetooth.printCustom("Hello World!", 2, 1);
+      await bluetooth.printCustom(text, 2, 1);
       await bluetooth.printNewLine();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Hello World sent to printer!')),
+        const SnackBar(content: Text('Text sent to printer!')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -308,31 +316,57 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
   }
 
   Widget _buildPrintPage() {
-    return Center(
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _isConnected && _selectedDevice != null
-                ? 'Connected to: ${_selectedDevice!.name ?? 'Unknown'}'
-                : 'Not connected',
-            style: TextStyle(
-              fontSize: 18,
-              color: _isConnected ? Colors.green : Colors.red,
-              fontWeight: FontWeight.bold,
+          // Top: Connection status
+          Padding(
+            padding: const EdgeInsets.only(bottom: 24.0),
+            child: Text(
+              _isConnected && _selectedDevice != null
+                  ? 'Connected to: ${_selectedDevice!.name ?? 'Unknown'}'
+                  : 'Not connected',
+              style: TextStyle(
+                fontSize: 18,
+                color: _isConnected ? Colors.green : Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 32),
-          ElevatedButton(
-            onPressed: (_isConnected == true && _selectedDevice != null) ? _printHelloWorld : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.all(24),
+          // Middle: Text box
+          Expanded(
+            child: Center(
+              child: SizedBox(
+                width: 350,
+                child: TextField(
+                  controller: _textController,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    labelText: 'Nome Cognome',
+                    hintText: 'Nome Cognome',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 22),
+                  maxLines: 1,
+                ),
+              ),
             ),
-            child: const Text(
-              'Print Hello World!',
-              style: TextStyle(fontSize: 22),
+          ),
+          // Bottom: Print button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: (_isConnected == true && _selectedDevice != null) ? _printHelloWorld : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                textStyle: const TextStyle(fontSize: 22),
+              ),
+              child: const Text('Print'),
             ),
           ),
         ],
@@ -374,6 +408,7 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
 
   @override
   void dispose() {
+  _textController.dispose();
     bluetooth.disconnect();
     super.dispose();
   }
