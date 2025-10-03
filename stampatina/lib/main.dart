@@ -28,6 +28,10 @@ class BluetoothPrinterApp extends StatefulWidget {
 }
 
 class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
+  // Removed duplicate declarations (already defined below)
+  List<TextEditingController> _addendControllers = [TextEditingController(text: '')];
+  // _totalSum getter removed (inlined in usage)
+  String _currentDateTime = '';
   final TextEditingController _textController = TextEditingController();
   BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
   List<BluetoothDevice> _devicesList = [];
@@ -39,7 +43,24 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
   @override
   void initState() {
     super.initState();
+    _updateDateTime();
     _initBluetooth();
+    // Update the datetime every second
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return false;
+      _updateDateTime();
+      return true;
+    });
+  }
+
+  void _updateDateTime() {
+    final now = DateTime.now();
+    final formatted = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    setState(() {
+      _currentDateTime = formatted;
+    });
   }
 
   void _initBluetooth() async {
@@ -200,16 +221,25 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
       );
       return;
     }
-    String text = _textController.text.trim();
-    if (text.isEmpty) {
+    String name = _textController.text.trim();
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter text to print.')),
       );
       return;
     }
+    List<double> addends = _addendControllers.map((c) => double.tryParse(c.text.replaceAll(',', '.')) ?? 0.0).toList();
+    double total = addends.fold(0.0, (sum, v) => sum + v);
     try {
       await bluetooth.printNewLine();
-      await bluetooth.printCustom(text, 2, 1);
+      await bluetooth.printCustom(_currentDateTime, 1, 1);
+      await bluetooth.printCustom(name, 2, 1);
+      await bluetooth.printNewLine();
+      for (int i = 0; i < addends.length; i++) {
+        await bluetooth.printCustom('Pesata ${i + 1}: ${addends[i].toStringAsFixed(1)}', 1, 1);
+      }
+      await bluetooth.printCustom('--------------------------', 1, 1);
+      await bluetooth.printCustom('Totale: ${total.toStringAsFixed(1)}', 2, 1);
       await bluetooth.printNewLine();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Text sent to printer!')),
@@ -323,7 +353,7 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
         children: [
           // Top: Connection status
           Padding(
-            padding: const EdgeInsets.only(bottom: 24.0),
+            padding: const EdgeInsets.only(bottom: 12.0),
             child: Text(
               _isConnected && _selectedDevice != null
                   ? 'Connected to: ${_selectedDevice!.name ?? 'Unknown'}'
@@ -336,23 +366,106 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
               textAlign: TextAlign.center,
             ),
           ),
-          // Middle: Text box
-          Expanded(
-            child: Center(
-              child: SizedBox(
-                width: 350,
-                child: TextField(
-                  controller: _textController,
-                  decoration: const InputDecoration(
-                    border: OutlineInputBorder(),
-                    labelText: 'Nome Cognome',
-                    hintText: 'Nome Cognome',
-                  ),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 22),
-                  maxLines: 1,
-                ),
+          // Show current date/time
+          Padding(
+            padding: const EdgeInsets.only(bottom: 24.0),
+            child: Text(
+              _currentDateTime,
+              style: const TextStyle(fontSize: 18, color: Colors.black54),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          // Name input
+          SizedBox(
+            width: 350,
+            child: TextField(
+              controller: _textController,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'Nome Cognome',
+                hintText: 'Nome Cognome',
               ),
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 22),
+              maxLines: 1,
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Addends list
+          Expanded(
+            child: Column(
+              children: [
+                // Addends fields
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _addendControllers.length,
+                    itemBuilder: (context, idx) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _addendControllers[idx],
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                decoration: InputDecoration(
+                                  labelText: 'Pesata ${idx + 1}',
+                                  border: const OutlineInputBorder(),
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                            if (_addendControllers.length > 1)
+                              IconButton(
+                                icon: const Icon(Icons.remove_circle, color: Colors.red),
+                                onPressed: () {
+                                  setState(() {
+                                    _addendControllers[idx].dispose();
+                                    _addendControllers.removeAt(idx);
+                                  });
+                                },
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Add button
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.add),
+                    label: const Text('aggiungi pesata'),
+                    onPressed: () {
+                      setState(() {
+                        _addendControllers.add(TextEditingController(text: ''));
+                      });
+                    },
+                  ),
+                ),
+                // Horizontal line
+                const Divider(thickness: 2),
+                // Total sum
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Totale:', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      Builder(
+                        builder: (context) {
+                          double total = _addendControllers.fold(0.0, (sum, c) {
+                            final v = double.tryParse(c.text.replaceAll(',', '.')) ?? 0.0;
+                            return sum + v;
+                          });
+                          return Text(total.toStringAsFixed(1), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold));
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           // Bottom: Print button
@@ -408,7 +521,10 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
 
   @override
   void dispose() {
-  _textController.dispose();
+    _textController.dispose();
+    for (final c in _addendControllers) {
+      c.dispose();
+    }
     bluetooth.disconnect();
     super.dispose();
   }
