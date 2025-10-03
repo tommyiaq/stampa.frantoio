@@ -28,11 +28,14 @@ class BluetoothPrinterApp extends StatefulWidget {
 }
 
 class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
-  // Removed duplicate declarations (already defined below)
+  final List<FocusNode> _addendFocusNodes = [FocusNode()];
   List<TextEditingController> _addendControllers = [TextEditingController(text: '')];
-  // _totalSum getter removed (inlined in usage)
   String _currentDateTime = '';
   final TextEditingController _textController = TextEditingController();
+  bool _restoringState = true;
+  // Keys for SharedPreferences
+  static const String _prefsNameKey = 'print_name';
+  static const String _prefsAddendsKey = 'print_addends';
   BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
   List<BluetoothDevice> _devicesList = [];
   BluetoothDevice? _selectedDevice;
@@ -45,6 +48,7 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
     super.initState();
     _updateDateTime();
     _initBluetooth();
+    _restorePrintState();
     // Update the datetime every second
     Future.doWhile(() async {
       await Future.delayed(const Duration(seconds: 1));
@@ -52,6 +56,41 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
       _updateDateTime();
       return true;
     });
+  }
+
+  Future<void> _restorePrintState() async {
+    setState(() {
+      _restoringState = true;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final name = prefs.getString(_prefsNameKey) ?? '';
+    final addends = prefs.getStringList(_prefsAddendsKey) ?? [''];
+    _textController.text = name;
+    // Dispose old controllers/focus nodes
+    for (final c in _addendControllers) {
+      c.dispose();
+    }
+    for (final n in _addendFocusNodes) {
+      n.dispose();
+    }
+    _addendControllers = addends.map((v) => TextEditingController(text: v)).toList();
+    _addendFocusNodes.clear();
+    _addendFocusNodes.addAll(List.generate(_addendControllers.length, (_) => FocusNode()));
+    setState(() {
+      _restoringState = false;
+    });
+  }
+
+  Future<void> _savePrintState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsNameKey, _textController.text);
+    await prefs.setStringList(_prefsAddendsKey, _addendControllers.map((c) => c.text).toList());
+  }
+
+  Future<void> _clearPrintState() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefsNameKey);
+    await prefs.remove(_prefsAddendsKey);
   }
 
   void _updateDateTime() {
@@ -239,8 +278,10 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
         await bluetooth.printCustom('Pesata ${i + 1}: ${addends[i].toStringAsFixed(1)}', 1, 1);
       }
       await bluetooth.printCustom('--------------------------', 1, 1);
-      await bluetooth.printCustom('Totale: ${total.toStringAsFixed(1)}', 2, 1);
+      await bluetooth.printCustom('Totale: ${total.toStringAsFixed(1)}     ', 2, 1); // Add spaces after total
       await bluetooth.printNewLine();
+      await bluetooth.printNewLine();
+  // Do not clear state after print; user must clear manually
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Text sent to printer!')),
       );
@@ -346,11 +387,40 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
   }
 
   Widget _buildPrintPage() {
+    if (_restoringState) {
+      return const Center(child: CircularProgressIndicator());
+    }
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Manual clear button
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.clear),
+              label: const Text('Clear'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                textStyle: const TextStyle(fontSize: 16),
+              ),
+              onPressed: () async {
+                // Clear name and addends, reset to one empty addend
+                setState(() {
+                  _textController.clear();
+                  for (final c in _addendControllers) c.dispose();
+                  for (final n in _addendFocusNodes) n.dispose();
+                  _addendControllers = [TextEditingController(text: '')];
+                  _addendFocusNodes.clear();
+                  _addendFocusNodes.add(FocusNode());
+                });
+                await _clearPrintState();
+              },
+            ),
+          ),
           // Top: Connection status
           Padding(
             padding: const EdgeInsets.only(bottom: 12.0),
@@ -388,6 +458,7 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 22),
               maxLines: 1,
+              onChanged: (_) => _savePrintState(),
             ),
           ),
           const SizedBox(height: 24),
@@ -407,12 +478,13 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
                             Expanded(
                               child: TextField(
                                 controller: _addendControllers[idx],
+                                focusNode: _addendFocusNodes[idx],
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: InputDecoration(
                                   labelText: 'Pesata ${idx + 1}',
                                   border: const OutlineInputBorder(),
                                 ),
-                                onChanged: (_) => setState(() {}),
+                                onChanged: (_) => _savePrintState(),
                               ),
                             ),
                             if (_addendControllers.length > 1)
@@ -421,8 +493,11 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
                                 onPressed: () {
                                   setState(() {
                                     _addendControllers[idx].dispose();
+                                    _addendFocusNodes[idx].dispose();
                                     _addendControllers.removeAt(idx);
+                                    _addendFocusNodes.removeAt(idx);
                                   });
+                                  _savePrintState();
                                 },
                               ),
                           ],
@@ -440,6 +515,12 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
                     onPressed: () {
                       setState(() {
                         _addendControllers.add(TextEditingController(text: ''));
+                        _addendFocusNodes.add(FocusNode());
+                      });
+                      _savePrintState();
+                      // Focus the new field after the frame
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        _addendFocusNodes.last.requestFocus();
                       });
                     },
                   ),
@@ -459,7 +540,7 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
                             final v = double.tryParse(c.text.replaceAll(',', '.')) ?? 0.0;
                             return sum + v;
                           });
-                          return Text(total.toStringAsFixed(1), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold));
+                          return Text(total.toStringAsFixed(1) + '     ', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold));
                         },
                       ),
                     ],
@@ -524,6 +605,9 @@ class _BluetoothPrinterAppState extends State<BluetoothPrinterApp> {
     _textController.dispose();
     for (final c in _addendControllers) {
       c.dispose();
+    }
+    for (final node in _addendFocusNodes) {
+      node.dispose();
     }
     bluetooth.disconnect();
     super.dispose();
